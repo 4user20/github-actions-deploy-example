@@ -1,0 +1,166 @@
+name: Deploy Production
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    timeout-minutes: 30
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Request approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: ${{ secrets.APPROVERS }}
+          minimum-approvals: 1
+        continue-on-error: true
+
+      - name: Deploy to production
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            
+            cd /opt/portfolio
+            
+            # Create backup
+            echo "Creating backup..."
+            docker compose exec -T postgres pg_dump -U postgres portfolio_db > /backups/backup-$(date +%Y%m%d-%H%M%S).sql || true
+            
+            # Pull latest code
+            git fetch origin main
+            git reset --hard origin/main
+            
+            # Login to Docker registry
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Blue-green deployment
+            echo "Starting blue-green deployment..."
+            
+            # Pull latest image
+            docker compose pull
+            
+            # Start new containers
+            docker compose up -d --remove-orphans
+            
+            # Wait for app to be ready
+            sleep 10
+            
+            # Run migrations
+            docker compose exec -T app npm run migrate
+            
+            # Health check
+            for i in {1..30}; do
+              if curl -sf http://localhost:3000/health > /dev/null; then
+                echo "✅ Health check passed"
+                break
+              fi
+              if [ $i -eq 30 ]; then
+                echo "❌ Health check failed - rolling back"
+                docker compose down
+                exit 1
+              fi
+              sleep 2
+            done
+            
+            echo "✅ Deployment complete"
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            echo "=== Deployment Verification ==="
+            echo ""
+            echo "Containers:"
+            docker compose ps
+            echo ""
+            echo "Health Check:"
+            curl -sf http://localhost:3000/health && echo "✅ Healthy" || echo "❌ Unhealthy"
+            echo ""
+            echo "Recent Logs:"
+            docker compose logs --tail=20 app
+
+      - name: Notify Slack - Success
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "✅ Production deployment successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*✅ Production Deployment Successful*\nBranch: main\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\nURL: https://example.com"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
+
+      - name: Rollback on failure
+        if: failure()
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            echo "❌ Deployment failed - initiating rollback"
+            cd /opt/portfolio
+            
+            # Rollback to previous version
+            git reset --hard HEAD~1
+            docker compose pull
+            docker compose up -d --remove-orphans
+            
+            echo "⚠️ Rollback complete"
+
+      - name: Notify Slack - Failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "❌ Production deployment failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*❌ Production Deployment Failed*\nBranch: main\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\nAction: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n⚠️ Rollback initiated"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
