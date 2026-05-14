@@ -32,79 +32,30 @@ jobs:
           command_timeout: 20m
           script: |
             set -euo pipefail
-            
+
             cd /opt/portfolio-staging
-            
-            # Pull latest code
-            git fetch origin develop
-            git reset --hard origin/develop
-            
+
             # Login to Docker registry
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            
-            # Pull latest image
-            docker compose pull
-            
+
+            # Pull latest image tagged with the commit SHA
+            docker compose pull app
+
             # Start services
             docker compose up -d --remove-orphans
-            
+
             # Wait for app to be ready
             sleep 10
-            
-            # Run migrations
-            docker compose exec -T app npm run migrate
-            
+
             # Health check
-            for i in {1..30}; do
-              if curl -sf http://localhost:3000/health > /dev/null; then
-                echo "✅ Health check passed"
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:3001/health > /dev/null; then
+                echo "Health check passed"
                 break
               fi
-              if [ $i -eq 30 ]; then
-                echo "❌ Health check failed"
+              if [ "$i" -eq 30 ]; then
+                echo "Health check failed"
                 exit 1
               fi
               sleep 2
             done
-
-      - name: Notify Slack - Success
-        if: success()
-        uses: slackapi/slack-github-action@v1
-        with:
-          payload: |
-            {
-              "text": "✅ Staging deployment successful",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*✅ Staging Deployment Successful*\nBranch: develop\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\nURL: https://staging.example.com"
-                  }
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        continue-on-error: true
-
-      - name: Notify Slack - Failure
-        if: failure()
-        uses: slackapi/slack-github-action@v1
-        with:
-          payload: |
-            {
-              "text": "❌ Staging deployment failed",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*❌ Staging Deployment Failed*\nBranch: develop\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\nAction: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                  }
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        continue-on-error: true

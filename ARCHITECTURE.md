@@ -1,5 +1,7 @@
 # GitHub Actions CI/CD Pipeline Architecture
 
+> This architecture shows an example CI/CD pipeline pattern for a TypeScript/Docker application.
+
 ## Pipeline Overview
 
 ```
@@ -44,7 +46,7 @@
 │  │  ├─ SSH to production server                        │  │
 │  │  ├─ Create backup                                   │  │
 │  │  ├─ Pull latest code                                │  │
-│  │  ├─ Blue-green deployment                           │  │
+│  │  ├─ Deploy application                              │  │
 │  │  ├─ Run migrations                                  │  │
 │  │  ├─ Health check                                    │  │
 │  │  └─ Rollback on failure                             │  │
@@ -53,7 +55,7 @@
 │                 ▼                                            │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │  Notifications                                       │  │
-│  │  ├─ Slack notification (success/failure)            │  │
+│  │  ├─ Slack notification (requires SLACK_WEBHOOK_URL) │  │
 │  │  └─ GitHub status check                             │  │
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
@@ -99,7 +101,7 @@
    - Runs on: ubuntu-latest
    - Steps:
      - Determine status
-     - Notify Slack
+     - Notify Slack (if SLACK_WEBHOOK_URL is configured)
 
 ### Staging Deployment (deploy-staging.yml)
 
@@ -118,7 +120,7 @@
 6. Start containers
 7. Run database migrations
 8. Health check (30 retries, 2s interval)
-9. Notify Slack
+9. Notify Slack (optional)
 
 ### Production Deployment (deploy-production.yml)
 
@@ -135,11 +137,11 @@
 4. Create database backup
 5. Pull latest code
 6. Login to Docker registry
-7. Blue-green deployment
+7. Deploy application
 8. Run database migrations
 9. Health check (30 retries, 2s interval)
 10. Verify deployment
-11. Notify Slack
+11. Notify Slack (optional)
 12. Rollback on failure
 
 ## Environment Configuration
@@ -151,16 +153,16 @@
 
 **For Staging**:
 - `STAGING_HOST` - Staging server IP/hostname
-- `STAGING_USER` - SSH username (usually ubuntu)
+- `STAGING_USER` - SSH username
 - `STAGING_SSH_KEY` - Private SSH key
 
 **For Production**:
 - `PROD_HOST` - Production server IP/hostname
-- `PROD_USER` - SSH username (usually ubuntu)
+- `PROD_USER` - SSH username
 - `PROD_SSH_KEY` - Private SSH key
 - `APPROVERS` - GitHub usernames for approval
 
-**For Notifications**:
+**For Notifications** (optional):
 - `SLACK_WEBHOOK_URL` - Slack webhook for notifications
 
 ### Environment Variables
@@ -184,54 +186,17 @@ NODE_ENV=production
 ### Secrets Management
 - All sensitive data stored in GitHub Secrets
 - SSH keys encrypted
-- Database credentials never in code
-- Tokens rotated regularly
+- Database credentials not committed in code
 
 ### Access Control
 - Production deployment requires manual approval
 - Separate staging and production environments
 - SSH key-based authentication only
-- Audit logs for all deployments
 
 ### Code Security
-- SAST scanning (CodeQL)
 - Dependency scanning (npm audit)
 - Container scanning (Trivy)
-- No hardcoded credentials
-
-## Performance Metrics
-
-### Build Times
-- CI: ~5-10 minutes
-- Docker build: ~3-5 minutes
-- Tests: ~2-3 minutes
-- Total: ~10-15 minutes
-
-### Deployment Times
-- Staging: ~5 minutes
-- Production: ~10 minutes (including approval)
-
-### Success Rate
-- Target: 95%+
-- Rollback time: < 5 minutes
-
-## Monitoring & Alerts
-
-### Slack Notifications
-- CI success/failure
-- Staging deployment status
-- Production deployment status
-- Rollback alerts
-
-### GitHub Status Checks
-- Required for PR merge
-- Shows test results
-- Shows build status
-
-### Logs
-- GitHub Actions logs (7 days retention)
-- Server deployment logs
-- Application logs (CloudWatch/ELK)
+- No hardcoded credentials in workflow files
 
 ## Troubleshooting
 
@@ -264,58 +229,6 @@ gh workflow run ci.yml --ref main
 # Check deployment status
 ssh user@host "docker compose ps"
 ```
-
-## Best Practices
-
-### Code Quality
-- ✅ All tests must pass before merge
-- ✅ Code coverage > 80%
-- ✅ No security vulnerabilities
-- ✅ Linting passes
-
-### Deployment
-- ✅ Always deploy to staging first
-- ✅ Manual approval for production
-- ✅ Automated rollback on failure
-- ✅ Health checks after deployment
-
-### Monitoring
-- ✅ Slack notifications for all deployments
-- ✅ Automated health checks
-- ✅ Database backups before deployment
-- ✅ Audit logs for all changes
-
-## Scaling Considerations
-
-### Parallel Jobs
-- Multiple test jobs for different test suites
-- Parallel Docker builds for different architectures
-- Matrix strategy for multiple Node.js versions
-
-### Self-Hosted Runners
-- Use for production deployments
-- Better performance and security
-- Custom environment setup
-
-### Caching
-- npm dependencies cache
-- Docker layer caching
-- Build artifacts cache
-
-## Cost Optimization
-
-### GitHub Actions
-- Free tier: 2,000 minutes/month
-- Paid: $0.008 per minute
-- Self-hosted runners: Free
-
-### Docker Registry
-- GHCR: Free for public repos
-- Private repos: $5/month
-
-### Infrastructure
-- Staging: t4g.micro (~$6/month)
-- Production: t4g.small (~$12/month)
 
 ## References
 

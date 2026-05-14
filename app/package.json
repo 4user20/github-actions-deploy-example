@@ -1,0 +1,11 @@
+{
+  "name": "ci-cd-demo-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reference app for CI/CD demo (actual app code in docker-nginx-letsencrypt-template/example-app/)",
+  "scripts": {
+    "typecheck": "echo 'Run typecheck in the example-app directory'",
+    "test": "echo 'Run tests in the example-app directory'",
+    "build": "echo 'Build in the example-app directory'"
+  }
+}
